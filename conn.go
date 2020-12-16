@@ -49,13 +49,13 @@ type conn struct {
 	errorChan  chan errorMessage
 	writeChan  chan writePacket
 	quitChan   chan struct{}
-	handlers   map[string]*namespaceHandler
+	handlers   *namespaceHandlers
 	namespaces map[string]*namespaceConn
 	closeOnce  sync.Once
 	id         uint64
 }
 
-func newConn(c engineio.Conn, handlers map[string]*namespaceHandler) (*conn, error) {
+func newConn(c engineio.Conn, handlers *namespaceHandlers) (*conn, error) {
 	ret := &conn{
 		Conn:       c,
 		encoder:    parser.NewEncoder(c),
@@ -91,7 +91,7 @@ func (c *conn) connect() error {
 	header := parser.Header{
 		Type: parser.Connect,
 	}
-	handler, ok := c.handlers[header.Namespace]
+	handler, ok := c.handlers.Get(header.Namespace)
 	if ok {
 		handler.dispatch(root, header, "", nil)
 	}
@@ -193,7 +193,7 @@ func (c *conn) serveRead() {
 				c.decoder.DiscardLast()
 				continue
 			}
-			handler, ok := c.handlers[header.Namespace]
+			handler, ok := c.handlers.Get(header.Namespace)
 			if !ok {
 				c.decoder.DiscardLast()
 				continue
@@ -223,7 +223,7 @@ func (c *conn) serveRead() {
 				conn = newNamespaceConn(c, header.Namespace)
 				c.namespaces[header.Namespace] = conn
 			}
-			handler, ok := c.handlers[header.Namespace]
+			handler, ok := c.handlers.Get(header.Namespace)
 			if ok {
 				handler.dispatch(conn, header, "", nil)
 			}
@@ -241,7 +241,7 @@ func (c *conn) serveRead() {
 				continue
 			}
 			delete(c.namespaces, header.Namespace)
-			handler, ok := c.handlers[header.Namespace]
+			handler, ok := c.handlers.Get(header.Namespace)
 			if ok {
 				handler.dispatch(conn, header, "", args)
 			}
@@ -250,5 +250,6 @@ func (c *conn) serveRead() {
 }
 
 func (c *conn) namespace(nsp string) *namespaceHandler {
-	return c.handlers[nsp]
+	handler, _ := c.handlers.Get(nsp)
+	return handler
 }

@@ -2,13 +2,38 @@ package socketio
 
 import (
 	"net/http"
+	"sync"
 
 	engineio "github.com/googollee/go-engine.io"
 )
 
+type namespaceHandlers struct {
+	mu       sync.RWMutex
+	handlers map[string]*namespaceHandler
+}
+
+func newNamespaceHandlers() *namespaceHandlers {
+	return &namespaceHandlers{
+		handlers: make(map[string]*namespaceHandler),
+	}
+}
+
+func (h *namespaceHandlers) Set(namespace string, handler *namespaceHandler) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.handlers[namespace] = handler
+}
+
+func (h *namespaceHandlers) Get(nsp string) (*namespaceHandler, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	handler, ok := h.handlers[nsp]
+	return handler, ok
+}
+
 // Server is a go-socket.io server.
 type Server struct {
-	handlers map[string]*namespaceHandler
+	handlers *namespaceHandlers
 	eio      *engineio.Server
 }
 
@@ -19,7 +44,7 @@ func NewServer(c *engineio.Options) (*Server, error) {
 		return nil, err
 	}
 	return &Server{
-		handlers: make(map[string]*namespaceHandler),
+		handlers: newNamespaceHandlers(),
 		eio:      eio,
 	}, nil
 }
@@ -73,7 +98,7 @@ func (s *Server) Serve() error {
 func (s *Server) serveConn(c engineio.Conn) {
 	_, err := newConn(c, s.handlers)
 	if err != nil {
-		root := s.handlers[""]
+		root, _ := s.handlers.Get("")
 		if root != nil && root.onError != nil {
 			root.onError(err)
 		}
@@ -85,11 +110,11 @@ func (s *Server) getNamespace(nsp string) *namespaceHandler {
 	if nsp == "/" {
 		nsp = ""
 	}
-	ret, ok := s.handlers[nsp]
+	ret, ok := s.handlers.Get(nsp)
 	if ok {
 		return ret
 	}
 	handler := newHandler()
-	s.handlers[nsp] = handler
+	s.handlers.Set(nsp, handler)
 	return handler
 }
